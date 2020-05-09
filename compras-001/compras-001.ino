@@ -1,8 +1,6 @@
 // V01: Leitor de produtos com RFID
 // autor: Misael Santos (misael@gmail.com)
 //  
-// TODO1: Colocar LED indicador do wifi
-
 /****************************************
  * Include Libraries
  ****************************************/
@@ -12,9 +10,9 @@
 #include <SPI.h> //biblioteca para comunicação do barramento SPI
 #include <ArduinoJson.h>
 
-#define WIFISSID "Simony_2G" // Put your WifiSSID here
-#define PASSWORD "4F63B89E" // Put your wifi password here
-#define TOKEN "BBFF-TXBx9JmZ5yjlpmmxOxzvysbIVirNRC" // Put your Ubidots' TOKEN
+#define WIFISSID "XXXX" // Put your WifiSSID here
+#define PASSWORD "XXXX" // Put your wifi password here
+#define TOKEN "XXXX" // Put your Ubidots' TOKEN
 #define MQTT_CLIENT_NAME "rfid01" // MQTT client Name, please enter your own 8-12 alphanumeric character ASCII string; 
                                            //it should be a random and unique ascii string and different from all other devices
 /****************************************
@@ -46,12 +44,12 @@ char str_sensor[10];
 
 // Indicador de sentido do estoque (0-remover, 1-adicionar)
 int stockMode = 0;
+String cardId;
 
 //Esse objeto 'chave' é utilizado para autenticação dos dispositivos RFID
 MFRC522::MIFARE_Key key;
 //código de status de retorno da autenticação RFID
 MFRC522::StatusCode status;
-
 // Definicoes pino modulo RC522
 MFRC522 mfrc522(SS_PIN, RST_PIN); 
 
@@ -74,11 +72,11 @@ void callbackMQTT(char* topic, byte* payload, unsigned int length) {
   Serial.print("Mensagem recebida no topico: ");
   Serial.println(topic);
 
+  // Getting the message payload string...
   char p[length + 1];
   memcpy(p, payload, length);
   p[length] = NULL;
   String message(p);
-
   Serial.write(payload, length);
 
   // Parsing JSON doc...
@@ -86,7 +84,7 @@ void callbackMQTT(char* topic, byte* payload, unsigned int length) {
   StaticJsonDocument<100> doc;
   DeserializationError err = deserializeJson(doc, payload);
   if (err) {
-    Serial.print(F("Falha ao let JSON: "));
+    Serial.print(F("Falha ao ler JSON: "));
     Serial.println(err.c_str());
     blinkLed(RED_LED);
   }
@@ -106,7 +104,7 @@ void reconnectMQTT() {
     
     // Attemp to connect
     if (client.connect(MQTT_CLIENT_NAME, TOKEN, "")) {
-      Serial.println("MQTT Conectado");
+      Serial.println("MQTT Conectado!");
       sprintf(topic, "%s/%s/%s", TOPIC_DEVICES, DEVICE_LABEL, STOCK_MODE_LABEL);  
       Serial.print("Assinando topico: ");
       Serial.println(topic);
@@ -123,21 +121,29 @@ void reconnectMQTT() {
 
 //faz a leitura dos dados do cartão/tag
 String readRFIDTag() {
-
   //imprime os detalhes tecnicos do cartão/tag
+  // Serial.println();
+  // mfrc522.PICC_DumpDetailsToSerial(&(mfrc522.uid)); 
+
+  // Reading Card ID...
+  long code=0; 
+  for (byte i = 0; i < mfrc522.uid.size; i++){
+    code=((code+mfrc522.uid.uidByte[i])*10);
+  }
+  char bufferId[mfrc522.uid.size];
+  sprintf(bufferId, "%d", code);
   Serial.println();
-  mfrc522.PICC_DumpDetailsToSerial(&(mfrc522.uid)); 
+  Serial.print(F("ID: "));
+  Serial.println(bufferId);
+  cardId = bufferId;
 
   //Prepara a chave - todas as chaves estão configuradas para FFFFFFFFFFFFh (Padrão de fábrica).
   for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
-
   //buffer para colocar os dados ligos
   byte buffer[SIZE_BUFFER] = {0};
-
   //bloco que faremos a operação
   byte bloco = 1;
   byte tamanho = SIZE_BUFFER;
-
   //faz a autenticação do bloco que vamos operar
   status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, bloco, &key, &(mfrc522.uid)); //line 834 of MFRC522.cpp file
   if (status != MFRC522::STATUS_OK) {
@@ -146,8 +152,7 @@ String readRFIDTag() {
     blinkLed(RED_LED);
     return (ERRO);
   }
-
-  //faz a leitura dos dados do bloco
+  //Faz a leitura dos dados do bloco
   status = mfrc522.MIFARE_Read(bloco, buffer, &tamanho);
   if (status != MFRC522::STATUS_OK) {
     Serial.print(F("Leitura RFID falhou: "));
@@ -162,9 +167,9 @@ String readRFIDTag() {
   String str = (char*)buffer;
   str = str.substring(0, MAX_SIZE_BLOCK);
   str.trim();
-  if (str == "") {
-    str = "novo";
-  }
+  // if (str == "") {
+  //   str = "novo";
+  // }
   return (str);
   
 }
@@ -183,8 +188,20 @@ void productSet(String produto) {
   client.publish(topic, payload);
   
   // client.loop();
-  delay(1000);
+  // delay(1000);
+  blinkLed(GREEN_LED);
 
+}
+
+void toggleStockMode() {
+  if (stockMode == 0) {
+    stockMode = 1;
+    Serial.print(F("\nReabastecendo!"));
+  } else {
+    stockMode = 0;
+    Serial.print(F("\nMonitoração de estoque!"));
+  }
+  productSet(STOCK_MODE_LABEL);
 }
 
 void setupWifi() {
@@ -251,24 +268,25 @@ void loop() {
   // Verifica se eh produto ou admin
   if (tag != ADMIN_TAG && tag != ERRO) {
 
-    Serial.print(F("\nProduto: "));
-    Serial.println(tag);
-    Serial.println();
+    if (tag != "") {
 
-    productSet(tag);
+      Serial.print(F("\nProduto: "));
+      Serial.println(tag);
+      Serial.println();
+      productSet(tag);
+
+    } else {
+
+      Serial.print(F("\nCartão em Branco: "));
+      Serial.println(cardId);
+
+    }
 
   } else {
 
     Serial.print(F("\nCartão Administrador!"));
-    //sleep(1000);
-    if (stockMode == 0) {
-      stockMode = 1;
-      Serial.print(F("\nReabastecendo!"));
-    } else {
-      stockMode = 0;
-      Serial.print(F("\nMonitoração de estoque!"));
-    }
-    productSet(STOCK_MODE_LABEL);
+    toggleStockMode();
+
   }
  
   // instrui o PICC quando no estado ACTIVE a ir para um estado de "parada"
