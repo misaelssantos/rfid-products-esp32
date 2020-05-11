@@ -4,25 +4,25 @@
 /****************************************
  * Include Libraries
  ****************************************/
+#include "secrets.h" // WIFISSID, PASSWORD, TOKEN_MQTT
 #include <WiFi.h>
 #include <PubSubClient.h> // MQTT
 #include <MFRC522.h> //biblioteca responsável pela comunicação com o módulo RFID-RC522
 #include <SPI.h> //biblioteca para comunicação do barramento SPI
 #include <ArduinoJson.h>
 
-#define WIFISSID "XXXX" // Put your WifiSSID here
-#define PASSWORD "XXXX" // Put your wifi password here
-#define TOKEN "XXXX" // Put your Ubidots' TOKEN
-#define MQTT_CLIENT_NAME "rfid01" // MQTT client Name, please enter your own 8-12 alphanumeric character ASCII string; 
-                                           //it should be a random and unique ascii string and different from all other devices
 /****************************************
  * Define Constants
  ****************************************/
 // MQTT
+#define MQTT_CLIENT_NAME "rfid01" // Name for the instance client
 #define TOPIC_DEVICES "/v1.6/devices"
 #define VARIABLE_LABEL "sensor" // Assing the variable label
+#define VARIABLE_TAGS "tags"
 #define DEVICE_LABEL "esp32" // Assig the device label
 #define STOCK_MODE_LABEL "modo"
+#define NEW_INFO "new"
+
 char MQTTBROKER[]  = "industrial.api.ubidots.com";
 char payload[100];
 char topic[150];
@@ -37,13 +37,15 @@ char str_sensor[10];
 
 // LED Indicadores
 #define GREEN_LED   12
-#define RED_LED     32
+#define YELLOW_LED  13
+#define RED_LED     14
 
 #define ERRO "Erro"
 #define ADMIN_TAG "admin"
 
 // Indicador de sentido do estoque (0-remover, 1-adicionar)
 int stockMode = 0;
+int recordMode = 1;
 String cardId;
 
 //Esse objeto 'chave' é utilizado para autenticação dos dispositivos RFID
@@ -65,6 +67,8 @@ void blinkLed(int led) {
   digitalWrite(led, LOW);
   delay(1000);
 }
+void turnLedOn(int led) { digitalWrite(led, HIGH); }
+void turnLedOff(int led) { digitalWrite(led, LOW); }
 
 void callbackMQTT(char* topic, byte* payload, unsigned int length) {
   Serial.println("");
@@ -103,7 +107,7 @@ void reconnectMQTT() {
     Serial.println("Conectando cliente MQTT...");
     
     // Attemp to connect
-    if (client.connect(MQTT_CLIENT_NAME, TOKEN, "")) {
+    if (client.connect(MQTT_CLIENT_NAME, TOKEN_MQTT, "")) {
       Serial.println("MQTT Conectado!");
       sprintf(topic, "%s/%s/%s", TOPIC_DEVICES, DEVICE_LABEL, STOCK_MODE_LABEL);  
       Serial.print("Assinando topico: ");
@@ -119,12 +123,8 @@ void reconnectMQTT() {
   }
 }
 
-//faz a leitura dos dados do cartão/tag
+//Faz a leitura dos dados do cartão/tag
 String readRFIDTag() {
-  //imprime os detalhes tecnicos do cartão/tag
-  // Serial.println();
-  // mfrc522.PICC_DumpDetailsToSerial(&(mfrc522.uid)); 
-
   // Reading Card ID...
   long code=0; 
   for (byte i = 0; i < mfrc522.uid.size; i++){
@@ -167,24 +167,30 @@ String readRFIDTag() {
   String str = (char*)buffer;
   str = str.substring(0, MAX_SIZE_BLOCK);
   str.trim();
-  // if (str == "") {
-  //   str = "novo";
-  // }
   return (str);
   
 }
 
+// Registrando valor do Produto
 void productSet(String produto) {
-  if (!client.connected()) {
-    reconnectMQTT();
-  }
-  // Registrando valor do Produto
+  // Montando msg...  
   sprintf(topic, "%s/%s", TOPIC_DEVICES, DEVICE_LABEL);
   sprintf(payload, "%s", ""); // Cleans the payload
   sprintf(payload, "{\"%s\":", produto); // Adds the variable label
   sprintf(payload, "%s {\"value\": %d}}", payload, stockMode); // Adds the value
+
+  publishMQTT(topic, payload);
+}
+
+void publishMQTT(char topic[], char payload[]) {
+  if (!client.connected()) {
+    reconnectMQTT();
+  }
   
-  Serial.println("Enviando dados via MQTT");
+  Serial.print("Enviando dados para o topico: ");
+  Serial.print(topic);
+  Serial.print(",");
+  Serial.println(payload);
   client.publish(topic, payload);
   
   // client.loop();
@@ -235,7 +241,9 @@ void setupRFID() {
 }
 
 void setup() {
+  // Configuring pins...
   pinMode(GREEN_LED, OUTPUT);
+  pinMode(YELLOW_LED, OUTPUT);
   pinMode(RED_LED, OUTPUT);
   // Wifi...
   setupWifi();
@@ -246,12 +254,31 @@ void setup() {
 
 }
 
+
+void ledIndicators() {
+
+  if (WiFi.status() == WL_CONNECTED) {
+    turnLedOn(GREEN_LED);
+  } else {
+    turnLedOff(GREEN_LED);
+  }
+
+  if (stockMode == 0) {
+    turnLedOn(YELLOW_LED);
+  } else {
+    turnLedOff(YELLOW_LED);
+  }
+
+}
+
 void loop() {
 
   if (!client.connected()) {
     reconnectMQTT();
   }
   client.loop();
+
+  ledIndicators();
 
    // Aguarda a aproximacao do cartao
   if (!mfrc522.PICC_IsNewCardPresent()) {
