@@ -40,8 +40,18 @@ char str_sensor[10];
 #define YELLOW_LED  13
 #define RED_LED     14
 
+#define BUZZER      27
+
 #define ERRO "Erro"
 #define ADMIN_TAG "admin"
+
+// Buzzer variables
+#define NOTE_C 523
+#define NOTE_E 659
+int freq = 2000;
+int channel = 0;
+int resolution = 8;
+
 
 // Indicador de sentido do estoque (0-remover, 1-adicionar)
 int stockMode = 0;
@@ -69,6 +79,21 @@ void blinkLed(int led) {
 }
 void turnLedOn(int led) { digitalWrite(led, HIGH); }
 void turnLedOff(int led) { digitalWrite(led, LOW); }
+void beep() {
+  ledcWrite(channel, 100);
+  ledcWriteTone(channel, NOTE_C);
+  delay(300);
+  ledcWriteTone(channel, 0);
+}
+void doubleBeep() {
+  ledcWrite(channel, 100);
+  ledcWriteTone(channel, NOTE_C); //c
+  delay(200);
+  ledcWriteTone(channel, NOTE_E); //e
+  delay(200);
+  ledcWriteTone(channel, 0);  
+}
+
 
 void callbackMQTT(char* topic, byte* payload, unsigned int length) {
   Serial.println("");
@@ -150,6 +175,7 @@ String readRFIDTag() {
     Serial.print(F("Autenticacao RFID falhou: "));
     Serial.println(mfrc522.GetStatusCodeName(status));
     blinkLed(RED_LED);
+    doubleBeep();
     return (ERRO);
   }
   //Faz a leitura dos dados do bloco
@@ -158,10 +184,12 @@ String readRFIDTag() {
     Serial.print(F("Leitura RFID falhou: "));
     Serial.println(mfrc522.GetStatusCodeName(status));
     blinkLed(RED_LED);
+    doubleBeep();
     return (ERRO);
   }
   else {
     blinkLed(GREEN_LED);
+    beep();    
   }
 
   String str = (char*)buffer;
@@ -180,6 +208,7 @@ void productSet(String produto) {
   sprintf(payload, "%s {\"value\": %d}}", payload, stockMode); // Adds the value
 
   publishMQTT(topic, payload);
+  
 }
 
 void publishMQTT(char topic[], char payload[]) {
@@ -187,14 +216,13 @@ void publishMQTT(char topic[], char payload[]) {
     reconnectMQTT();
   }
   
-  Serial.print("Enviando dados para o topico: ");
+  Serial.print("\nEnviando dados para o topico: ");
   Serial.print(topic);
   Serial.print(",");
   Serial.println(payload);
   client.publish(topic, payload);
   
   // client.loop();
-  // delay(1000);
   blinkLed(GREEN_LED);
 
 }
@@ -215,7 +243,7 @@ void setupWifi() {
   WiFi.begin(WIFISSID, PASSWORD);
   Serial.println();
   Serial.print("Aguardando WiFi..."); 
-  while (WiFi.status() != WL_CONNECTED) {
+  while (WiFi.status() != WL_CONNECTED) {   
     Serial.print(".");
     blinkLed(RED_LED);
   }
@@ -245,12 +273,19 @@ void setup() {
   pinMode(GREEN_LED, OUTPUT);
   pinMode(YELLOW_LED, OUTPUT);
   pinMode(RED_LED, OUTPUT);
+
+  // Buzzer
+  ledcSetup(channel, freq, resolution);
+  ledcAttachPin(BUZZER, channel);  
+
   // Wifi...
   setupWifi();
   // Inicia MQTT Client...
   setupMQTT();   
   // Inicia MFRC522
   setupRFID();
+
+  beep();
 
 }
 
