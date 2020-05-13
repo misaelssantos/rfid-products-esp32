@@ -134,7 +134,7 @@ void reconnectMQTT() {
     // Attemp to connect
     if (client.connect(MQTT_CLIENT_NAME, TOKEN_MQTT, "")) {
       Serial.println("MQTT Conectado!");
-      sprintf(topic, "%s/%s/%s", TOPIC_DEVICES, DEVICE_LABEL, STOCK_MODE_LABEL);  
+      sprintf(topic, "%s/%s", TOPIC_DEVICES, "config");
       Serial.print("Assinando topico: ");
       Serial.println(topic);
       client.subscribe(topic);
@@ -211,6 +211,17 @@ void productSet(String produto) {
   
 }
 
+void modetSet(int value) {
+  // Montando msg...  
+  sprintf(topic, "%s/%s", TOPIC_DEVICES, "config");
+  sprintf(payload, "%s", ""); // Cleans the payload
+  sprintf(payload, "{\"%s\":", STOCK_MODE_LABEL); // Adds the variable label
+  sprintf(payload, "%s {\"value\": %d}}", payload, value); // Adds the value
+
+  publishMQTT(topic, payload);
+  
+}
+
 void publishMQTT(char topic[], char payload[]) {
   if (!client.connected()) {
     reconnectMQTT();
@@ -235,7 +246,7 @@ void toggleStockMode() {
     stockMode = 0;
     Serial.print(F("\nMonitoração de estoque!"));
   }
-  productSet(STOCK_MODE_LABEL);
+  modetSet(stockMode);
 }
 
 void setupWifi() {
