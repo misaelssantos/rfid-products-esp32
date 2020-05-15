@@ -16,14 +16,16 @@
  ****************************************/
 // MQTT
 #define MQTT_CLIENT_NAME "rfid01" // Name for the instance client
-#define TOPIC_DEVICES "/v1.6/devices"
+#define TOPIC_PREFIX "/compras/devices"
+#define TOPIC_STOCKMODE "/compras/devices/config/mode"
 #define VARIABLE_LABEL "sensor" // Assing the variable label
 #define VARIABLE_TAGS "tags"
 #define DEVICE_LABEL "esp32" // Assig the device label
 #define STOCK_MODE_LABEL "modo"
 #define NEW_INFO "new"
 
-char MQTTBROKER[]  = "industrial.api.ubidots.com";
+// char MQTTBROKER[]  = "industrial.api.ubidots.com";
+char MQTTBROKER[]  = "192.168.0.17";
 char payload[100];
 char topic[150];
 // Space to store values to send
@@ -51,7 +53,6 @@ char str_sensor[10];
 int freq = 2000;
 int channel = 0;
 int resolution = 8;
-
 
 // Indicador de sentido do estoque (0-remover, 1-adicionar)
 int stockMode = 0;
@@ -102,22 +103,43 @@ void callbackMQTT(char* topic, byte* payload, unsigned int length) {
   Serial.println(topic);
 
   // Getting the message payload string...
-  char p[length + 1];
-  memcpy(p, payload, length);
-  p[length] = NULL;
-  String message(p);
+  char buffer[length + 1];
+  memcpy(buffer, payload, length);
+  buffer[length] = NULL;
+  String message(buffer);
+  Serial.print("Valor (byte): ");
   Serial.write(payload, length);
+
+  // Convert it to integer
+  char *end = nullptr;
+  long value = strtol(buffer, &end, 10);
+  
+  // Check for conversion errors
+  if (end == buffer || errno == ERANGE) {
+    Serial.print(F("Falha ao ler valor!"));
+    blinkLed(RED_LED); // Conversion error occurred
+  } else {
+    Serial.println("CONVERTEU!!!!");
+    Serial.println(value);
+  }
 
   // Parsing JSON doc...
   //const int capacity = JSON_OBJECT_SIZE(3) + 2*JSON_OBJECT_SIZE(1);
-  StaticJsonDocument<100> doc;
-  DeserializationError err = deserializeJson(doc, payload);
-  if (err) {
-    Serial.print(F("Falha ao ler JSON: "));
-    Serial.println(err.c_str());
-    blinkLed(RED_LED);
-  }
-  int value = doc["value"];
+  // StaticJsonDocument<100> doc;
+  // DeserializationError err = deserializeJson(doc, payload);
+  // if (err) {
+  //  Serial.print(F("Falha ao ler JSON: "));
+  //  Serial.println(err.c_str());
+  //  blinkLed(RED_LED);
+  // }
+  
+
+  // JsonObject documentRoot = doc.as<JsonObject>();
+  // JsonObject& object = doc.createObject();
+  // documentRoot.printTo(Serial);
+
+  // int value = doc["value"];
+  
   Serial.println();
   Serial.print("Valor: ");
   Serial.println(value);
@@ -132,9 +154,9 @@ void reconnectMQTT() {
     Serial.println("Conectando cliente MQTT...");
     
     // Attemp to connect
-    if (client.connect(MQTT_CLIENT_NAME, TOKEN_MQTT, "")) {
+    if (client.connect(MQTT_CLIENT_NAME, MQTT_USER, MQTT_PASSWORD)) {
       Serial.println("MQTT Conectado!");
-      sprintf(topic, "%s/%s", TOPIC_DEVICES, "config");
+      sprintf(topic, "%s", TOPIC_STOCKMODE);
       Serial.print("Assinando topico: ");
       Serial.println(topic);
       client.subscribe(topic);
@@ -202,10 +224,12 @@ String readRFIDTag() {
 // Registrando valor do Produto
 void productSet(String produto) {
   // Montando msg...  
-  sprintf(topic, "%s/%s", TOPIC_DEVICES, DEVICE_LABEL);
-  sprintf(payload, "%s", ""); // Cleans the payload
-  sprintf(payload, "{\"%s\":", produto); // Adds the variable label
-  sprintf(payload, "%s {\"value\": %d}}", payload, stockMode); // Adds the value
+  sprintf(topic, "%s/%s/%s", TOPIC_PREFIX, DEVICE_LABEL, produto);
+  // Usando string nessa concatenacao pelo problema com strings grandes no sprintf
+  // String strpayload = "{\"" + produto + "\": ";
+  // strpayload.toCharArray(payload, 100);
+  //sprintf(payload, "%s {\"value\": %d}}", payload, stockMode); // Adds the value  
+  sprintf(payload, "%d", stockMode); // Adds the value
 
   publishMQTT(topic, payload);
   
@@ -213,10 +237,11 @@ void productSet(String produto) {
 
 void modetSet(int value) {
   // Montando msg...  
-  sprintf(topic, "%s/%s", TOPIC_DEVICES, "config");
-  sprintf(payload, "%s", ""); // Cleans the payload
-  sprintf(payload, "{\"%s\":", STOCK_MODE_LABEL); // Adds the variable label
-  sprintf(payload, "%s {\"value\": %d}}", payload, value); // Adds the value
+  // sprintf(topic, "%s", TOPIC_STOCKMODE);
+  // sprintf(payload, "%s", ""); // Cleans the payload
+  // sprintf(payload, "{\"%s\":", STOCK_MODE_LABEL); // Adds the variable label
+  // sprintf(payload, "%s {\"value\": %d}}", payload, value); // Adds the value
+  sprintf(payload, "%d", value); // Adds the value
 
   publishMQTT(topic, payload);
   
