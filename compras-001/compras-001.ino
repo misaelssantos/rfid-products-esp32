@@ -228,7 +228,7 @@ void publishMQTT(char topic[], char payload[]) {
   Serial.print(topic);
   Serial.print(",");
   Serial.println(payload);
-  client.publish(topic, payload);
+  client.publish(topic, payload, true);
   
   // client.loop();
   blinkLed(GREEN_LED);
