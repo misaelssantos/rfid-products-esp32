@@ -4,13 +4,11 @@
 /****************************************
  * Include Libraries
  ****************************************/
-#include "secrets.h" // WIFISSID, PASSWORD, TOKEN_MQTT
+#include "secrets.h" // WIFISSID, PASSWORD, MQTT_USER, MQTT_PASSWORD
 #include <WiFi.h>
 #include <PubSubClient.h> // MQTT
-#include <MFRC522.h> //biblioteca responsável pela comunicação com o módulo RFID-RC522
-#include <SPI.h> //biblioteca para comunicação do barramento SPI
-#include <ArduinoJson.h>
-
+#include <MFRC522.h>      // RFID-RC522
+#include <SPI.h>          // RFID: Comunicação do barramento SPI
 /****************************************
  * Define Constants
  ****************************************/
@@ -18,17 +16,10 @@
 #define MQTT_CLIENT_NAME "rfid01" // Name for the instance client
 #define TOPIC_PREFIX "/compras/devices/esp32/"
 #define TOPIC_STOCKMODE "/compras/devices/config/mode"
-#define VARIABLE_LABEL "sensor" // Assing the variable label
-#define VARIABLE_TAGS "tags"
-#define STOCK_MODE_LABEL "modo"
-#define NEW_INFO "new"
 
-// char MQTTBROKER[]  = "industrial.api.ubidots.com";
 char MQTTBROKER[]  = "192.168.0.17";
 char payload[100];
 char topic[150];
-// Space to store values to send
-char str_sensor[10];
 
 // RFID
 #define SS_PIN    21
@@ -77,16 +68,24 @@ void blinkLed(int led) {
   digitalWrite(led, LOW);
   delay(1000);
 }
-void turnLedOn(int led) { digitalWrite(led, HIGH); }
-void turnLedOff(int led) { digitalWrite(led, LOW); }
+
+void turnLedOn(int led) { 
+  digitalWrite(led, HIGH); 
+}
+
+void turnLedOff(int led) { 
+  digitalWrite(led, LOW); 
+}
+
 void beep() {
-  ledcWrite(channel, 100);
+  ledcWrite(channel, 255);
   ledcWriteTone(channel, NOTE_C);
   delay(300);
   ledcWriteTone(channel, 0);
 }
+
 void doubleBeep() {
-  ledcWrite(channel, 100);
+  ledcWrite(channel, 255);
   ledcWriteTone(channel, NOTE_C); //c
   delay(200);
   ledcWriteTone(channel, NOTE_E); //e
@@ -94,7 +93,7 @@ void doubleBeep() {
   ledcWriteTone(channel, 0);  
 }
 
-
+// MQTT subscription
 void callbackMQTT(char* topic, byte* payload, unsigned int length) {
   Serial.println("");
   Serial.println("-----------------------");
@@ -126,10 +125,12 @@ void callbackMQTT(char* topic, byte* payload, unsigned int length) {
 }
 
 void reconnectMQTT() {
+  int count = 0;
   // Loop until we're reconnected
   while (!client.connected()) {
+    count = count + 1;
     Serial.println("Conectando cliente MQTT...");
-    
+
     // Attemp to connect
     if (client.connect(MQTT_CLIENT_NAME, MQTT_USER, MQTT_PASSWORD)) {
       Serial.println("MQTT Conectado!");
@@ -142,8 +143,18 @@ void reconnectMQTT() {
       Serial.print(client.state());
       Serial.println(" tentando novamente em 2 segundos");
       // Wait 2 seconds before retrying
+      sleep(2);
       blinkLed(RED_LED);
     }
+
+    if (count == 10) {
+      Serial.println("");
+      Serial.println("Tentativa 10...");
+      Serial.println("");
+      setupMQTT();
+      break;
+    }
+
   }
 }
 
@@ -210,7 +221,7 @@ void productSet(String produto) {
   
 }
 
-void modetSet(int value) {
+void modeSet(int value) {
   // Montando msg...  
   sprintf(topic, "%s", TOPIC_STOCKMODE);
   sprintf(payload, "%d", value); // Adds the value
@@ -223,13 +234,13 @@ void publishMQTT(char topic[], char payload[]) {
   if (!client.connected()) {
     reconnectMQTT();
   }
-  
+
   Serial.print("\nEnviando dados para o topico: ");
   Serial.print(topic);
   Serial.print(",");
   Serial.println(payload);
   client.publish(topic, payload, true);
-  
+
   // client.loop();
   blinkLed(GREEN_LED);
 
@@ -243,12 +254,13 @@ void toggleStockMode() {
     stockMode = 0;
     Serial.println(F("\nMonitoração de estoque!"));
   }
-  modetSet(stockMode);
+  modeSet(stockMode);
 }
 
 void setupWifi() {
   Serial.begin(115200);
   WiFi.begin(WIFISSID, PASSWORD);
+  WiFi.mode(WIFI_STA);
   Serial.println();
   Serial.print("Aguardando WiFi..."); 
   while (WiFi.status() != WL_CONNECTED) {   
@@ -296,7 +308,6 @@ void setup() {
   beep();
 
 }
-
 
 void ledIndicators() {
 
@@ -358,7 +369,7 @@ void loop() {
     toggleStockMode();
 
   }
- 
+
   // instrui o PICC quando no estado ACTIVE a ir para um estado de "parada"
   mfrc522.PICC_HaltA(); 
   // "stop" a encriptação do PCD, deve ser chamado após a comunicação com autenticação, caso contrário novas comunicações não poderão ser iniciadas
