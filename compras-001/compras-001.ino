@@ -221,13 +221,13 @@ void productSet(String produto) {
   
 }
 
-void modeSet(int value) {
+void statusSet(String strTopic, int value) {
   // Montando msg...  
-  sprintf(topic, "%s", TOPIC_STOCKMODE);
+  sprintf(topic, "%s", strTopic);
   sprintf(payload, "%d", value); // Adds the value
 
   publishMQTT(topic, payload);
-  
+
 }
 
 void publishMQTT(char topic[], char payload[]) {
@@ -254,23 +254,23 @@ void toggleStockMode() {
     stockMode = 0;
     Serial.println(F("\nMonitoração de estoque!"));
   }
-  modeSet(stockMode);
+  statusSet(TOPIC_STOCKMODE, stockMode);
 }
 
 void setupWifi() {
-  Serial.begin(115200);
+
   WiFi.begin(WIFISSID, PASSWORD);
   WiFi.mode(WIFI_STA);
   Serial.println();
   Serial.print("Aguardando WiFi..."); 
-  while (WiFi.status() != WL_CONNECTED) {   
+  while (WiFi.status() != WL_CONNECTED) {
     Serial.print(".");
     blinkLed(RED_LED);
   }
   Serial.println("");
   Serial.println("WiFi Conectado");
   Serial.println("IP address: ");
-  Serial.println(WiFi.localIP()); 
+  Serial.println(WiFi.localIP());
   blinkLed(GREEN_LED);
 }
 
@@ -293,11 +293,11 @@ void setup() {
   pinMode(GREEN_LED, OUTPUT);
   pinMode(YELLOW_LED, OUTPUT);
   pinMode(RED_LED, OUTPUT);
-
   // Buzzer
   ledcSetup(channel, freq, resolution);
   ledcAttachPin(BUZZER, channel);  
 
+  Serial.begin(115200);
   // Wifi...
   setupWifi();
   // Inicia MQTT Client...
@@ -314,7 +314,7 @@ void ledIndicators() {
   if (WiFi.status() == WL_CONNECTED) {
     turnLedOn(GREEN_LED);
   } else {
-    turnLedOff(GREEN_LED);
+    turnLedOff(GREEN_LED);    
   }
 
   if (stockMode == 0) {
@@ -327,9 +327,14 @@ void ledIndicators() {
 
 void loop() {
 
+  if (WiFi.status() != WL_CONNECTED) {
+    setupWifi();
+  }
+
   if (!client.connected()) {
     reconnectMQTT();
   }
+
   client.loop();
 
   ledIndicators();
