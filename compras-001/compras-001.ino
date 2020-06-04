@@ -4,38 +4,32 @@
 /****************************************
  * Include Libraries
  ****************************************/
-#include "secrets.h" // WIFISSID, PASSWORD, MQTT_USER, MQTT_PASSWORD
+#include "secrets.h"  // WIFISSID, PASSWORD, MQTT_USER, MQTT_PASSWORD
 #include <WiFi.h>
-#include <PubSubClient.h> // MQTT
-#include <MFRC522.h>      // RFID-RC522
-#include <SPI.h>          // RFID: Comunicação do barramento SPI
+#include <PubSubClient.h>  // MQTT
+#include <MFRC522.h>       // RFID-RC522
+#include <SPI.h>           // RFID: Comunicação do barramento SPI
+#include "DHTesp.h"        // Sensor DHT11
+
 /****************************************
  * Define Constants
  ****************************************/
-// MQTT
-#define MQTT_CLIENT_NAME "rfid01" // Name for the instance client
-#define TOPIC_PREFIX "/compras/devices/esp32/"
-#define TOPIC_STOCKMODE "/compras/devices/config/mode"
-
-char MQTTBROKER[]  = "192.168.0.17";
-char payload[100];
-char topic[150];
-
-// RFID
-#define SS_PIN    21
-#define RST_PIN   22
-#define SIZE_BUFFER     18
-#define MAX_SIZE_BLOCK  16
 
 // LED Indicadores
 #define GREEN_LED   12
 #define YELLOW_LED  13
 #define RED_LED     14
-
+// RFID
+#define SS_PIN    21
+#define RST_PIN   22
+//
 #define BUZZER      27
+#define DHTSENSOR   17
 
 #define ERRO "Erro"
 #define ADMIN_TAG "admin"
+
+#define INTERVAL 10000000 // Timer de 30s para a leitura do sensor DHT11.
 
 // Buzzer variables
 #define NOTE_C 523
@@ -49,213 +43,26 @@ int stockMode = 0;
 int recordMode = 1;
 String cardId;
 
-//Esse objeto 'chave' é utilizado para autenticação dos dispositivos RFID
+// Wifi
+WiFiClient wifi;
+// MQTT
+PubSubClient client(wifi);
+// Sensor
+DHTesp dht;
+// RFID
+// Esse objeto 'chave' é utilizado para autenticação dos dispositivos RFID
 MFRC522::MIFARE_Key key;
-//código de status de retorno da autenticação RFID
+// código de status de retorno da autenticação RFID
 MFRC522::StatusCode status;
 // Definicoes pino modulo RC522
 MFRC522 mfrc522(SS_PIN, RST_PIN); 
 
-WiFiClient wifi;
-PubSubClient client(wifi);
-
-/****************************************
- * Auxiliar Functions
- ****************************************/
-void blinkLed(int led) {
-  digitalWrite(led, HIGH);
-  delay(1000);
-  digitalWrite(led, LOW);
-  delay(1000);
-}
-
-void turnLedOn(int led) { 
-  digitalWrite(led, HIGH); 
-}
-
-void turnLedOff(int led) { 
-  digitalWrite(led, LOW); 
-}
-
-void beep() {
-  ledcWrite(channel, 255);
-  ledcWriteTone(channel, NOTE_C);
-  delay(300);
-  ledcWriteTone(channel, 0);
-}
-
-void doubleBeep() {
-  ledcWrite(channel, 255);
-  ledcWriteTone(channel, NOTE_C); //c
-  delay(200);
-  ledcWriteTone(channel, NOTE_E); //e
-  delay(200);
-  ledcWriteTone(channel, 0);  
-}
-
-// MQTT subscription
-void callbackMQTT(char* topic, byte* payload, unsigned int length) {
-  Serial.println("");
-  Serial.println("-----------------------");
-  Serial.print("Mensagem recebida no topico: ");
-  Serial.println(topic);
-
-  // Getting the message payload string...
-  char buffer[length + 1];
-  memcpy(buffer, payload, length);
-  buffer[length] = NULL;
-
-  // Convert it to integer
-  char *end = nullptr;
-  long value = strtol(buffer, &end, 10);
-  
-  // Check for conversion errors
-  if (end == buffer || errno == ERANGE) {
-    Serial.print(F("Falha ao ler valor!"));
-    blinkLed(RED_LED); // Conversion error occurred
-    return;
-  } 
-
-  Serial.println();
-  Serial.print("Valor: ");
-  Serial.println(value);
-  stockMode = value;
-  blinkLed(GREEN_LED);
-
-}
-
-void reconnectMQTT() {
-  int count = 0;
-  // Loop until we're reconnected
-  while (!client.connected()) {
-    count = count + 1;
-    Serial.println("Conectando cliente MQTT...");
-
-    // Attemp to connect
-    if (client.connect(MQTT_CLIENT_NAME, MQTT_USER, MQTT_PASSWORD)) {
-      Serial.println("MQTT Conectado!");
-      sprintf(topic, "%s", TOPIC_STOCKMODE);
-      Serial.print("Assinando topico: ");
-      Serial.println(topic);
-      client.subscribe(topic);
-    } else {
-      Serial.print("Falha, rc=");
-      Serial.print(client.state());
-      Serial.println(" tentando novamente em 2 segundos");
-      // Wait 2 seconds before retrying
-      sleep(2);
-      blinkLed(RED_LED);
-    }
-
-    if (count == 10) {
-      Serial.println("");
-      Serial.println("Tentativa 10...");
-      Serial.println("");
-      setupMQTT();
-      break;
-    }
-
-  }
-}
-
-//Faz a leitura dos dados do cartão/tag
-String readRFIDTag() {
-  // Reading Card ID...
-  long code=0; 
-  for (byte i = 0; i < mfrc522.uid.size; i++){
-    code=((code+mfrc522.uid.uidByte[i])*10);
-  }
-  char bufferId[mfrc522.uid.size];
-  sprintf(bufferId, "%d", code);
-  Serial.println();
-  Serial.print(F("ID: "));
-  Serial.println(bufferId);
-  cardId = bufferId;
-
-  //Prepara a chave - todas as chaves estão configuradas para FFFFFFFFFFFFh (Padrão de fábrica).
-  for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
-  //buffer para colocar os dados ligos
-  byte buffer[SIZE_BUFFER] = {0};
-  //bloco que faremos a operação
-  byte bloco = 1;
-  byte tamanho = SIZE_BUFFER;
-  //faz a autenticação do bloco que vamos operar
-  status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, bloco, &key, &(mfrc522.uid)); //line 834 of MFRC522.cpp file
-  if (status != MFRC522::STATUS_OK) {
-    Serial.print(F("Autenticacao RFID falhou: "));
-    Serial.println(mfrc522.GetStatusCodeName(status));
-    blinkLed(RED_LED);
-    doubleBeep();
-    return (ERRO);
-  }
-  //Faz a leitura dos dados do bloco
-  status = mfrc522.MIFARE_Read(bloco, buffer, &tamanho);
-  if (status != MFRC522::STATUS_OK) {
-    Serial.print(F("Leitura RFID falhou: "));
-    Serial.println(mfrc522.GetStatusCodeName(status));
-    blinkLed(RED_LED);
-    doubleBeep();
-    return (ERRO);
-  }
-  else {
-    blinkLed(GREEN_LED);
-    beep();    
-  }
-
-  String str = (char*)buffer;
-  str = str.substring(0, MAX_SIZE_BLOCK);
-  str.trim();
-  return (str);
-  
-}
-
-// Registrando valor do Produto
-void productSet(String produto) {
-  // Montando msg...
-  String strtopic = TOPIC_PREFIX + produto;
-  strtopic.toCharArray(topic, 100);
-  // Valor
-  sprintf(payload, "%d", stockMode); // Adds the value
-
-  publishMQTT(topic, payload);
-  
-}
-
-void statusSet(String strTopic, int value) {
-  // Montando msg...  
-  sprintf(topic, "%s", strTopic);
-  sprintf(payload, "%d", value); // Adds the value
-
-  publishMQTT(topic, payload);
-
-}
-
-void publishMQTT(char topic[], char payload[]) {
-  if (!client.connected()) {
-    reconnectMQTT();
-  }
-
-  Serial.print("\nEnviando dados para o topico: ");
-  Serial.print(topic);
-  Serial.print(",");
-  Serial.println(payload);
-  client.publish(topic, payload);
-
-  // client.loop();
-  blinkLed(GREEN_LED);
-
-}
-
-void toggleStockMode() {
-  if (stockMode == 0) {
-    stockMode = 1;
-    Serial.println(F("\nReabastecendo!"));
-  } else {
-    stockMode = 0;
-    Serial.println(F("\nMonitoração de estoque!"));
-  }
-  statusSet(TOPIC_STOCKMODE, stockMode);
-}
+// Preparando timer...
+hw_timer_t * timer = NULL;
+float temperature;
+float humidity;
+boolean publishSensors = false;
+String statusString;
 
 void setupWifi() {
 
@@ -274,21 +81,8 @@ void setupWifi() {
   blinkLed(GREEN_LED);
 }
 
-void setupMQTT() {
-  SPI.begin(); // Init SPI bus
-  client.setServer(MQTTBROKER, 1883);
-  client.setCallback(callbackMQTT);  
-}
-
-void setupRFID() {
-  mfrc522.PCD_Init(); 
-  // Mensagens iniciais no serial monitor
-  Serial.println();
-  Serial.println("Aproxime o seu cartao do leitor...");
-  Serial.println();  
-}
-
 void setup() {
+  startTimer();
   // Configuring pins...
   pinMode(GREEN_LED, OUTPUT);
   pinMode(YELLOW_LED, OUTPUT);
@@ -304,6 +98,9 @@ void setup() {
   setupMQTT();   
   // Inicia MFRC522
   setupRFID();
+
+  // Sensor DHT11
+  dht.setup(DHTSENSOR, DHTesp::DHT11);
 
   beep();
 
@@ -325,6 +122,44 @@ void ledIndicators() {
 
 }
 
+void callbackTimer() {
+  statusString = dht.getStatusString();
+  if (statusString == "OK") {
+    // Setting flag to publish sensors...
+    publishSensors = true;
+  }
+}
+
+void verifySensors() {
+  
+  humidity = dht.getHumidity();
+  temperature = dht.getTemperature();
+  statusString = dht.getStatusString();
+
+  if (publishSensors and (statusString == "OK")) {
+    publishSensors = false;
+    publishTemperature(temperature);
+    publishHumidity(humidity);
+  }
+}
+
+void startTimer(){
+    /* 0 - seleção do timer a ser usado, de 0 a 3.
+      80 - prescaler. O clock principal do ESP32 é 80MHz. Dividimos por 80 para ter 1us por tick.
+    true - true para contador progressivo, false para regressivo
+    */
+    timer = timerBegin(0, 80, true);
+    timerAttachInterrupt(timer, &callbackTimer, true);
+    timerAlarmWrite(timer, INTERVAL, true); 
+    //ativa o alarme
+    timerAlarmEnable(timer);
+}
+
+void stopTimer(){
+    timerEnd(timer);
+    timer = NULL; 
+}
+
 void loop() {
 
   if (WiFi.status() != WL_CONNECTED) {
@@ -338,6 +173,8 @@ void loop() {
   client.loop();
 
   ledIndicators();
+
+  verifySensors();
 
    // Aguarda a aproximacao do cartao
   if (!mfrc522.PICC_IsNewCardPresent()) {
