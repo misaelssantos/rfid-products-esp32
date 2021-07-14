@@ -5,7 +5,7 @@
 #define TOPIC_TEMPERATURE "/compras/sensor/temperature"
 #define TOPIC_HUMIDITY "/compras/sensor/humidity"
 
-char MQTTBROKER[]  = "192.168.0.17";
+char MQTTBROKER[]  = "192.168.68.113";
 char payload[100];
 char topic[150];
 
